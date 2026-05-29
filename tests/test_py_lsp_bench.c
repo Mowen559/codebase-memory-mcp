@@ -262,7 +262,7 @@ TEST(pylsp_bench_resolution_ratio) {
     /* Time budget. ASan+UBSan instrumentation slows the parse ~5-10×, so
      * scale the budget when a sanitizer is active. Native: 150 ms for a
      * ~200-line fixture; sanitized: 1500 ms. */
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+#ifdef __SANITIZE_ADDRESS__
     ASSERT(ms < 1500.0);
 #else
     ASSERT(ms < 150.0);
