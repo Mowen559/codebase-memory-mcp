@@ -12,6 +12,14 @@
 #include "foundation/constants.h"
 
 enum { REG_INIT_CAP = 16, REG_MIN_CANDIDATES = 3, REG_RESOLVED = 1, REG_SUFFIX_ALLOC = 2 };
+/* Names with more registered definitions than this are unresolvable by name
+ * alone: candidate_count_penalty already floors their confidence to ~3/count
+ * (<= 0.006 at 256), so the emitted edge is noise — while the candidate walk
+ * (reachability + scoring per candidate, re-done per file) is the dominant
+ * resolution cost on identifier-dense repos. On the Linux kernel, 274 names
+ * exceed 256 candidates ("list_head" 7188, "flags" 5520, "dev" 4374, ...) and
+ * accounted for ~900 s of the 987 s usage-resolution CPU. Bail out early. */
+enum { REG_MAX_CANDIDATES = 256 };
 #define REG_FULL_CONF 1.0
 #define REG_HALF_PENALTY 0.5
 
@@ -604,6 +612,9 @@ static cbm_resolution_t resolve_name_lookup(const cbm_registry_t *r, const char 
     if (!arr || arr->count == 0) {
         return empty_result();
     }
+    if (arr->count > REG_MAX_CANDIDATES) {
+        return empty_result(); /* unresolvably ambiguous — see REG_MAX_CANDIDATES */
+    }
 
     /* Strategy 3: unique name */
     if (arr->count == SKIP_ONE) {
@@ -729,6 +740,9 @@ cbm_fuzzy_result_t cbm_registry_fuzzy_resolve(const cbm_registry_t *r, const cha
     qn_array_t *arr = cbm_ht_get(r->by_name, lookup);
     if (!arr || arr->count == 0) {
         return no_match;
+    }
+    if (arr->count > REG_MAX_CANDIDATES) {
+        return no_match; /* unresolvably ambiguous — see REG_MAX_CANDIDATES */
     }
 
     bool have_imports = (import_map_vals && import_map_count > 0);
