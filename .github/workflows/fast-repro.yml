@@ -1,0 +1,39 @@
+# Fast repro lane — single platform, NO sanitizers — for quick fix-iteration
+# feedback (the red-count after a fix) without waiting ~15 min for the full
+# 5-platform ASan board. The full bug-repro.yml board remains the comprehensive
+# all-platform check; this is just the fast inner loop.
+#
+# Trigger: workflow_dispatch, or push to a qa/fast-** branch. Non-gating.
+name: Fast Repro
+
+on:
+  workflow_dispatch:
+    inputs:
+      asan:
+        description: 'Build with ASan/UBSan (slower; needed for crash/UAF reds)'
+        type: boolean
+        default: false
+  push:
+    branches: ['qa/fast-**']
+
+permissions:
+  contents: read
+
+jobs:
+  fast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Install deps
+        run: sudo apt-get update && sudo apt-get install -y zlib1g-dev
+      - name: test-repro (fast, no sanitizers by default)
+        run: |
+          # No-ASan build is much faster and is enough for the extraction /
+          # attribution / invariant reds (the bulk). Crash/UAF reds need ASan
+          # → dispatch with asan=true, or rely on the full board.
+          if [ "${{ inputs.asan }}" = "true" ]; then
+            scripts/repro.sh CC=gcc CXX=g++
+          else
+            scripts/repro.sh CC=gcc CXX=g++ SANITIZE=
+          fi
