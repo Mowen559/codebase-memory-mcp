@@ -2808,6 +2808,28 @@ static void extract_func_def(CBMExtractCtx *ctx, TSNode node, const CBMLangSpec 
         }
     }
 
+    // Pony: fun/be/new (method/constructor/ffi_method) live in pony_func_types,
+    // so the main def-walk extracts them here as "Function"; but one declared
+    // inside a class/actor/struct/trait/interface/primitive IS a method. Detect
+    // the enclosing class-like ancestor and promote it to "Method" with a
+    // parent_class link (the class name is the first identifier child — no field).
+    if (ctx->language == CBM_LANG_PONY && def.label && strcmp(def.label, "Function") == 0 &&
+        spec->class_node_types) {
+        for (TSNode cur = ts_node_parent(node); !ts_node_is_null(cur); cur = ts_node_parent(cur)) {
+            if (cbm_kind_in_set(cur, spec->class_node_types)) {
+                def.label = "Method";
+                TSNode cn = cbm_find_child_by_kind(cur, "identifier");
+                if (!ts_node_is_null(cn)) {
+                    char *cname = cbm_node_text(a, cn, ctx->source);
+                    if (cname && cname[0]) {
+                        def.parent_class = cbm_fqn_compute(a, ctx->project, ctx->rel_path, cname);
+                    }
+                }
+                break;
+            }
+        }
+    }
+
     // Decorators + route extraction from decorator AST
     def.decorators = extract_decorators(a, node, ctx->source, ctx->language, spec);
     extract_route_from_decorators(a, node, ctx->source, spec, &def.route_path, &def.route_method);
