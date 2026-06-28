@@ -1704,6 +1704,41 @@ static void kt_push_implicit_call(CBMExtractCtx *ctx, TSNode node, const char *c
     cbm_calls_push(&ctx->result->calls, ctx->arena, call);
 }
 
+// C++ overloaded binary operator `a + b`: the operator method (`operator+`) is
+// invoked implicitly, so the call walk never sees a call node. Synthesize a
+// textual call to the bare operator name so the c-LSP's lsp_operator resolution
+// (which keys the same `operator<tok>` member on the lhs type) has a call site to
+// join. The operator token is the first unnamed child, mirroring c_lsp.c's binary
+// handling. Builtin-operand expressions (int + int) synthesize an `operator+`
+// callee too, but no such member exists so the call resolves to nothing and is
+// dropped — no spurious edge.
+static void extract_cpp_operator_call(CBMExtractCtx *ctx, TSNode node, const char *kind,
+                                      const char *enclosing_func_qn) {
+    if (strcmp(kind, "binary_expression") != 0) {
+        return;
+    }
+    TSNode lhs = ts_node_child_by_field_name(node, TS_FIELD("left"));
+    TSNode rhs = ts_node_child_by_field_name(node, TS_FIELD("right"));
+    if (ts_node_is_null(lhs) || ts_node_is_null(rhs)) {
+        return;
+    }
+    for (uint32_t i = 0; i < ts_node_child_count(node); i++) {
+        TSNode child = ts_node_child(node, i);
+        if (ts_node_is_named(child)) {
+            continue;
+        }
+        char *op = cbm_node_text(ctx->arena, child, ctx->source);
+        if (op && op[0]) {
+            CBMCall call = {0};
+            call.callee_name = cbm_arena_sprintf(ctx->arena, "operator%s", op);
+            call.enclosing_func_qn = enclosing_func_qn;
+            call.start_line = (int)ts_node_start_point(node).row + TS_LINE_OFFSET;
+            cbm_calls_push(&ctx->result->calls, ctx->arena, call);
+        }
+        break;
+    }
+}
+
 static void extract_kotlin_desugared_calls(CBMExtractCtx *ctx, TSNode node, const char *kind,
                                            const char *enclosing_func_qn) {
     if (strcmp(kind, "property_declaration") == 0) {
@@ -1832,5 +1867,9 @@ void handle_calls(CBMExtractCtx *ctx, TSNode node, const CBMLangSpec *spec, Walk
     if (ctx->language == CBM_LANG_KOTLIN) {
         extract_kotlin_operator_call(ctx, node, ts_node_type(node), state->enclosing_func_qn);
         extract_kotlin_desugared_calls(ctx, node, ts_node_type(node), state->enclosing_func_qn);
+    }
+
+    if (ctx->language == CBM_LANG_CPP || ctx->language == CBM_LANG_CUDA) {
+        extract_cpp_operator_call(ctx, node, ts_node_type(node), state->enclosing_func_qn);
     }
 }
